@@ -12,11 +12,6 @@ LOG_MODULE_DECLARE(bmi270);
 #include "bmi270.h"
 
 #if defined(CONFIG_BMI270_STREAM)
-/* Dedicated work queue so FIFO handler runs on a thread with large stack (SPI + RTIO). */
-static K_KERNEL_STACK_DEFINE(bmi270_fifo_work_stack, CONFIG_BMI270_FIFO_WORKQ_STACK_SIZE);
-static struct k_work_q bmi270_fifo_work_q;
-static bool bmi270_fifo_work_q_initialized;
-
 static inline const struct gpio_dt_spec *bmi270_fifo_irq_pin(const struct bmi270_config *cfg)
 {
 #if defined(CONFIG_BMI270_FIFO_ON_INT2)
@@ -26,27 +21,7 @@ static inline const struct gpio_dt_spec *bmi270_fifo_irq_pin(const struct bmi270
 #endif
 }
 
-static void bmi270_fifo_work_handler(struct k_work *work)
-{
-	struct bmi270_data *data = CONTAINER_OF(work, struct bmi270_data, fifo_work);
-
-	bmi270_stream_handle_fifo(data->dev);
-}
-
-void bmi270_submit_fifo_work(const struct device *dev)
-{
-	struct bmi270_data *data = dev->data;
-
-	k_work_submit_to_queue(&bmi270_fifo_work_q, &data->fifo_work);
-}
-
-struct k_work_q *bmi270_get_fifo_work_q(void)
-{
-	return &bmi270_fifo_work_q;
-}
-
-static bool bmi270_try_submit_fifo_irq(const struct device *dev,
-				       const struct gpio_dt_spec *irq_pin,
+static bool bmi270_try_submit_fifo_irq(const struct device *dev, const struct gpio_dt_spec *irq_pin,
 				       const char *label)
 {
 	struct bmi270_data *data = dev->data;
@@ -59,8 +34,8 @@ static bool bmi270_try_submit_fifo_irq(const struct device *dev,
 		gpio_pin_interrupt_configure_dt(irq_pin, GPIO_INT_DISABLE);
 	}
 
-	LOG_DBG("%s: submit FIFO work", label);
-	k_work_submit_to_queue(&bmi270_fifo_work_q, &data->fifo_work);
+	LOG_DBG("%s: handle FIFO stream", label);
+	bmi270_stream_submit_fifo_job(dev);
 	return true;
 }
 #endif
@@ -237,10 +212,8 @@ static int bmi270_init_int_pin(const struct gpio_dt_spec *pin,
 	return 0;
 }
 
-static int bmi270_configure_int_io_ctrl(const struct device *dev,
-					const struct gpio_dt_spec *pin,
-					uint8_t reg,
-					const char *name)
+static int bmi270_configure_int_io_ctrl(const struct device *dev, const struct gpio_dt_spec *pin,
+					uint8_t reg, const char *name)
 {
 	int ret;
 	uint8_t io_ctrl = BMI270_INT_IO_CTRL_OUTPUT_EN | BMI270_INT_IO_CTRL_LVL;
@@ -287,25 +260,12 @@ int bmi270_init_interrupts(const struct device *dev)
 		return -EINVAL;
 	}
 
-#if defined(CONFIG_BMI270_STREAM)
-	if (!bmi270_fifo_work_q_initialized) {
-		k_work_queue_init(&bmi270_fifo_work_q);
-		k_work_queue_start(&bmi270_fifo_work_q, bmi270_fifo_work_stack,
-				   K_THREAD_STACK_SIZEOF(bmi270_fifo_work_stack),
-				   CONFIG_BMI270_THREAD_PRIORITY - 1, NULL);
-		bmi270_fifo_work_q_initialized = true;
-	}
-	k_work_init(&data->fifo_work, bmi270_fifo_work_handler);
-#endif
-
-	ret = bmi270_configure_int_io_ctrl(dev, &cfg->int1,
-					   BMI270_REG_INT1_IO_CTRL, "INT1");
+	ret = bmi270_configure_int_io_ctrl(dev, &cfg->int1, BMI270_REG_INT1_IO_CTRL, "INT1");
 	if (ret < 0) {
 		return ret;
 	}
 
-	ret = bmi270_configure_int_io_ctrl(dev, &cfg->int2,
-					   BMI270_REG_INT2_IO_CTRL, "INT2");
+	ret = bmi270_configure_int_io_ctrl(dev, &cfg->int2, BMI270_REG_INT2_IO_CTRL, "INT2");
 	if (ret < 0) {
 		return ret;
 	}
@@ -325,7 +285,8 @@ int bmi270_init_interrupts(const struct device *dev)
 		return ret;
 	}
 
-	/* Clear any stale latched status so INT pins deassert before the
+	/*
+	 * Clear any stale latched status so INT pins deassert before the
 	 * GPIO edge interrupt is armed.
 	 */
 	uint8_t dummy[2];
@@ -378,7 +339,6 @@ static int bmi270_anymo_config(const struct device *dev, bool enable)
 static int bmi270_drdy_config(const struct device *dev, bool enable)
 {
 	int ret;
-
 	uint8_t int_map_data = 0;
 
 	if (enable) {
