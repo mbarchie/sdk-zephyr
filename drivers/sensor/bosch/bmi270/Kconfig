@@ -77,7 +77,7 @@ config BMI270_LOW_POWER_MODE
 	  the cost of higher noise (no digital filtering / OSR).
 
 config BMI270_STREAM
-	bool "Enable FIFO streaming via sensor_stream()"
+	bool "FIFO streaming via sensor_stream()"
 	depends on BMI270_TRIGGER
 	depends on $(dt_compat_any_has_prop,$(DT_COMPAT_BOSCH_BMI270),irq-gpios)
 	select SENSOR_ASYNC_API
@@ -95,7 +95,7 @@ config BMI270_FIFO_ON_INT2
 	  if your board routes the FIFO interrupt to the sensor's INT2 pin.
 
 config BMI270_FIFO_POLL_FALLBACK
-	bool "Enable poll-based FIFO fallback alongside GPIO interrupt"
+	bool "Poll-based FIFO fallback alongside GPIO interrupt"
 	depends on BMI270_STREAM
 	default n
 	help

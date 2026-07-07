@@ -20,11 +20,6 @@
 
 LOG_MODULE_REGISTER(bmi270, CONFIG_SENSOR_LOG_LEVEL);
 
-#define BMI270_WR_LEN                           256
-#define BMI270_CONFIG_FILE_RETRIES              15
-#define BMI270_CONFIG_FILE_POLL_PERIOD_US       10000
-#define BMI270_INTER_WRITE_DELAY_US             1000
-
 static inline int bmi270_bus_check(const struct device *dev)
 {
 	const struct bmi270_config *cfg = dev->config;
@@ -212,10 +207,9 @@ static int set_accel_odr_osr(const struct device *dev, const struct sensor_value
 			pwr_ctrl &= ~BMI270_PWR_CTRL_ACC_EN;
 		}
 
-		if (IS_ENABLED(CONFIG_BMI270_LOW_POWER_MODE) ||
-		    odr_bits < BMI270_ACC_ODR_100_HZ) {
-			acc_conf = BMI270_SET_BITS(acc_conf, BMI270_ACC_FILT,
-						   BMI270_ACC_FILT_PWR_OPT);
+		if (IS_ENABLED(CONFIG_BMI270_LOW_POWER_MODE) || odr_bits < BMI270_ACC_ODR_100_HZ) {
+			acc_conf =
+				BMI270_SET_BITS(acc_conf, BMI270_ACC_FILT, BMI270_ACC_FILT_PWR_OPT);
 		} else {
 			acc_conf = BMI270_SET_BITS(acc_conf, BMI270_ACC_FILT,
 						   BMI270_ACC_FILT_PERF_OPT);
@@ -398,20 +392,15 @@ static int set_gyro_odr_osr(const struct device *dev, const struct sensor_value 
 			pwr_ctrl &= ~BMI270_PWR_CTRL_GYR_EN;
 		}
 
-		if (IS_ENABLED(CONFIG_BMI270_LOW_POWER_MODE) ||
-		    odr_bits < BMI270_GYR_ODR_100_HZ) {
-			gyr_conf = BMI270_SET_BITS(gyr_conf,
-						   BMI270_GYR_FILT,
-						   BMI270_GYR_FILT_PWR_OPT);
-			gyr_conf = BMI270_SET_BITS(gyr_conf,
-						   BMI270_GYR_FILT_NOISE,
+		if (IS_ENABLED(CONFIG_BMI270_LOW_POWER_MODE) || odr_bits < BMI270_GYR_ODR_100_HZ) {
+			gyr_conf =
+				BMI270_SET_BITS(gyr_conf, BMI270_GYR_FILT, BMI270_GYR_FILT_PWR_OPT);
+			gyr_conf = BMI270_SET_BITS(gyr_conf, BMI270_GYR_FILT_NOISE,
 						   BMI270_GYR_FILT_NOISE_PWR);
 		} else {
-			gyr_conf = BMI270_SET_BITS(gyr_conf,
-						   BMI270_GYR_FILT,
+			gyr_conf = BMI270_SET_BITS(gyr_conf, BMI270_GYR_FILT,
 						   BMI270_GYR_FILT_PERF_OPT);
-			gyr_conf = BMI270_SET_BITS(gyr_conf,
-						   BMI270_GYR_FILT_NOISE,
+			gyr_conf = BMI270_SET_BITS(gyr_conf, BMI270_GYR_FILT_NOISE,
 						   BMI270_GYR_FILT_NOISE_PERF);
 		}
 
@@ -738,8 +727,7 @@ static int bmi270_init(const struct device *dev)
 	}
 
 	if (chip_id != BMI270_CHIP_ID) {
-		LOG_ERR("Unexpected chip id (0x%02x). Expected (0x%02x)",
-			chip_id, BMI270_CHIP_ID);
+		LOG_ERR("Unexpected chip id (0x%02x). Expected (0x%02x)", chip_id, BMI270_CHIP_ID);
 		return -EIO;
 	}
 
@@ -751,6 +739,13 @@ static int bmi270_init(const struct device *dev)
 	}
 
 	k_usleep(BMI270_SOFT_RESET_TIME);
+
+	/* Initialize bus after soft reset according to BMI270 spec */
+	ret = bmi270_bus_init(dev);
+	if (ret != 0) {
+		LOG_ERR("Could not initiate bus communication");
+		return ret;
+	}
 
 	ret = bmi270_reg_read(dev, BMI270_REG_PWR_CONF, &adv_pwr_save, 1);
 	if (ret != 0) {
@@ -872,23 +867,25 @@ static const struct bmi270_feature_config bmi270_feature_base = {
  * and SENSOR_TRIG_MOTION will return -ENOTSUP at runtime.
  */
 #if defined(CONFIG_BMI270_FIFO_ON_INT2)
-#define BMI270_SINGLE_IRQ_INT1(inst) {}
+#define BMI270_SINGLE_IRQ_INT1(inst)                                                               \
+	{                                                                                          \
+	}
 #define BMI270_SINGLE_IRQ_INT2(inst) GPIO_DT_SPEC_INST_GET_BY_IDX(inst, irq_gpios, 0)
 #else
 #define BMI270_SINGLE_IRQ_INT1(inst) GPIO_DT_SPEC_INST_GET_BY_IDX(inst, irq_gpios, 0)
-#define BMI270_SINGLE_IRQ_INT2(inst) {}
+#define BMI270_SINGLE_IRQ_INT2(inst)                                                               \
+	{                                                                                          \
+	}
 #endif
 
-#define BMI270_CONFIG_INT_1(inst) \
-	.int1 = BMI270_SINGLE_IRQ_INT1(inst), \
-	.int2 = BMI270_SINGLE_IRQ_INT2(inst),
-#define BMI270_CONFIG_INT_2(inst) \
-	.int1 = GPIO_DT_SPEC_INST_GET_BY_IDX(inst, irq_gpios, 0), \
+#define BMI270_CONFIG_INT_1(inst)                                                                  \
+	.int1 = BMI270_SINGLE_IRQ_INT1(inst), .int2 = BMI270_SINGLE_IRQ_INT2(inst),
+#define BMI270_CONFIG_INT_2(inst)                                                                  \
+	.int1 = GPIO_DT_SPEC_INST_GET_BY_IDX(inst, irq_gpios, 0),                                  \
 	.int2 = GPIO_DT_SPEC_INST_GET_BY_IDX(inst, irq_gpios, 1),
-#define BMI270_CONFIG_INT(inst) \
-	COND_CODE_1(DT_INST_PROP_HAS_IDX(inst, irq_gpios, 1), \
-		    (BMI270_CONFIG_INT_2(inst)), \
-		    (BMI270_CONFIG_INT_1(inst)))
+#define BMI270_CONFIG_INT(inst)                                                                    \
+	COND_CODE_1(DT_INST_PROP_HAS_IDX(inst, irq_gpios, 1),                                      \
+		    (BMI270_CONFIG_INT_2(inst)), (BMI270_CONFIG_INT_1(inst)))
 #else
 #define BMI270_CONFIG_INT(inst)
 #endif

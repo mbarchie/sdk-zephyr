@@ -13,11 +13,11 @@
 /** Encoded FIFO buffer header for BMI270 */
 struct bmi270_decoder_header {
 	uint64_t timestamp;
-	uint8_t is_fifo : 1;
-	uint8_t is_headerless : 1; /* 1 = FIFO had no per-frame headers; fixed 12 B/frame */
-	uint8_t acc_range : 2;   /* 0=2G, 1=4G, 2=8G, 3=16G */
-	uint8_t gyr_range_idx : 3; /* 0=2000dps .. 4=125dps */
-	uint8_t reserved : 1;
+	uint8_t is_fifo: 1;
+	uint8_t is_headerless: 1; /* 1 = FIFO had no per-frame headers; fixed 12 B/frame */
+	uint8_t acc_range: 2;     /* 0=2G, 1=4G, 2=8G, 3=16G */
+	uint8_t gyr_range_idx: 3; /* 0=2000dps .. 4=125dps */
+	uint8_t reserved: 1;
 	uint16_t acc_odr_hz;
 	uint16_t gyr_odr_hz;
 } __attribute__((__packed__));

@@ -18,7 +18,13 @@
 #include <zephyr/drivers/i2c.h>
 #include <zephyr/devicetree.h>
 #include <zephyr/drivers/gpio.h>
+#include <zephyr/spinlock.h>
 #include <zephyr/sys/mpsc_lockfree.h>
+
+#define BMI270_WR_LEN                           32
+#define BMI270_CONFIG_FILE_RETRIES              15
+#define BMI270_CONFIG_FILE_POLL_PERIOD_US       10000
+#define BMI270_INTER_WRITE_DELAY_US             1000
 
 #if defined(CONFIG_BMI270_STREAM)
 #include <zephyr/rtio/rtio.h>
@@ -50,6 +56,8 @@ void bmi270_submit_stream(const struct device *dev, struct rtio_iodev_sqe *iodev
 #define BMI270_REG_TEMPERATURE_0   0x22
 #define BMI270_REG_FIFO_LENGTH_0   0x24
 #define BMI270_REG_FIFO_DATA       0x26
+
+#define BMI270_FIFO_DRAIN_CHUNK_SIZE 64
 #define BMI270_REG_FEAT_PAGE       0x2F
 #define BMI270_REG_FEATURES_0      0x30
 #define BMI270_REG_ACC_CONF        0x40
@@ -123,8 +131,8 @@ void bmi270_submit_stream(const struct device *dev, struct rtio_iodev_sqe *iodev
 #define BMI270_INT_IO_CTRL_OUTPUT_EN	BIT(3) /* Output enabled */
 #define BMI270_INT_IO_CTRL_INPUT_EN	BIT(4) /* Input enabled */
 
-#define BMI270_INT_LATCH_NONE		0x00
-#define BMI270_INT_LATCH_PERMANENT	0x01
+#define BMI270_INT_LATCH_NONE      0x00
+#define BMI270_INT_LATCH_PERMANENT 0x01
 
 /* Applies to INT1_MAP_FEAT, INT2_MAP_FEAT, INT_STATUS_0 */
 #define BMI270_INT_MAP_SIG_MOTION        BIT(0)
@@ -135,16 +143,16 @@ void bmi270_submit_stream(const struct device *dev, struct rtio_iodev_sqe *iodev
 #define BMI270_INT_MAP_NO_MOTION         BIT(5)
 #define BMI270_INT_MAP_ANY_MOTION        BIT(6)
 
-#define BMI270_INT_MAP_DATA_FFULL_INT1 BIT(0)
-#define BMI270_INT_MAP_DATA_FWM_INT1   BIT(1)
-#define BMI270_INT_MAP_DATA_DRDY_INT1  BIT(2)
-#define BMI270_INT_MAP_DATA_ERR_INT1   BIT(3)
-#define BMI270_INT_MAP_DATA_FFULL_INT2 BIT(4)
-#define BMI270_INT_MAP_DATA_FWM_INT2   BIT(5)
-#define BMI270_INT_MAP_DATA_DRDY_INT2  BIT(6)
-#define BMI270_INT_MAP_DATA_ERR_INT2   BIT(7)
+#define BMI270_INT_MAP_DATA_FFULL_INT1		BIT(0)
+#define BMI270_INT_MAP_DATA_FWM_INT1		BIT(1)
+#define BMI270_INT_MAP_DATA_DRDY_INT1		BIT(2)
+#define BMI270_INT_MAP_DATA_ERR_INT1		BIT(3)
+#define BMI270_INT_MAP_DATA_FFULL_INT2		BIT(4)
+#define BMI270_INT_MAP_DATA_FWM_INT2		BIT(5)
+#define BMI270_INT_MAP_DATA_DRDY_INT2		BIT(6)
+#define BMI270_INT_MAP_DATA_ERR_INT2		BIT(7)
 
-#define BMI270_INT_STATUS_ANY_MOTION BIT(6)
+#define BMI270_INT_STATUS_ANY_MOTION		BIT(6)
 
 /* INT_STATUS_1 */
 #define BMI270_INT_STATUS_1_FFULL_INT    BIT(0)
@@ -346,17 +354,21 @@ struct bmi270_data {
 	struct rtio_iodev_sqe *streaming_sqe;
 	uint16_t fifo_watermark_bytes;
 	uint16_t fifo_len;
+	uint16_t fifo_drain_len;
 	uint8_t int_status_1;
 	uint8_t fifo_status[2];
 	uint8_t *fifo_data_buf;
+	uint8_t fifo_discard_buf[BMI270_FIFO_DRAIN_CHUNK_SIZE];
 	uint8_t spi_dummy_byte;
 	uint64_t timestamp;
 	struct mpsc fifo_jobs;
 	struct mpsc_node fifo_job;
 	struct k_work fifo_job_work;
-	atomic_t fifo_job_queued;
-	atomic_t fifo_job_processing;
+	struct k_spinlock fifo_job_lock;
+	uint16_t fifo_job_pending;
 	uint8_t fifo_job_phase;
+	bool fifo_job_queued;
+	bool fifo_job_processing;
 #endif /* CONFIG_BMI270_STREAM */
 };
 
